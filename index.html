@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bolão dos Fernandes</title>
+
+<!--
+  ============================================================
+  BANCO DE DADOS (Supabase) — obrigatório
+  ============================================================
+  Todos os dados ficam no banco. Nada é salvo no navegador, então
+  qualquer pessoa que abrir o link vê a mesma lista de jogos.
+
+  1) Crie um projeto em supabase.com
+  2) Rode o SQL abaixo no SQL Editor
+  3) Preencha CONFIG (logo no início do <script>) com a Project URL
+     e a chave publishable (Project Settings › API Keys)
+
+  -- TABELAS ------------------------------------------------
+  create table if not exists public.jogos (
+    id         bigint generated always as identity primary key,
+    apostador  text,
+    numeros    smallint[] not null,
+    criado_em  timestamptz not null default now(),
+    constraint jogos_15_numeros check (array_length(numeros, 1) = 15)
+  );
+
+  create table if not exists public.sorteios (
+    id         bigint generated always as identity primary key,
+    concurso   integer,
+    numeros    smallint[] not null,
+    criado_em  timestamptz not null default now(),
+    constraint sorteios_15_numeros check (array_length(numeros, 1) = 15)
+  );
+
+  -- ACESSO -------------------------------------------------
+  alter table public.jogos    enable row level security;
+  alter table public.sorteios enable row level security;
+
+  create policy "jogos_select"    on public.jogos    for select using (true);
+  create policy "jogos_insert"    on public.jogos    for insert with check (true);
+  create policy "jogos_delete"    on public.jogos    for delete using (true);
+  create policy "sorteios_select" on public.sorteios for select using (true);
+  create policy "sorteios_insert" on public.sorteios for insert with check (true);
+
+  -- ATUALIZAÇÃO AO VIVO ------------------------------------
+  alter publication supabase_realtime add table public.jogos;
+  alter publication supabase_realtime add table public.sorteios;
+
+  Atenção: essas policies deixam qualquer pessoa com o link ler, incluir
+  e remover jogos. É o suficiente para um bolão entre amigos. Se o bolão
+  crescer, troque por Supabase Auth e policies por usuário.
+-->
+
+<style>
+  :root{
+    --ink:#0F3D2E;
+    --ink-soft:#3E5B50;
+    --paper:#FFFFFF;
+    --paper-2:#F4F7F5;
+    --line:#DDE3DF;
+    --gold:#B8860B;
+    --gold-bg:#FBF1DA;
+    --gold-line:#E3C572;
+    --danger:#B3261E;
+    --danger-bg:#FCEEED;
+    --live:#1E8E5A;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--paper-2);
+    color:var(--ink);
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:28px 18px 64px;}
+  h1{font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.01em;}
+  .sub{color:var(--ink-soft);font-size:14px;margin:0 0 14px;}
+  h2{font-size:15px;font-weight:700;margin:0 0 12px;color:var(--ink);}
+  section{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px;
+    margin-bottom:20px;
+  }
+  .conn{
+    display:flex;align-items:center;gap:8px;
+    font-size:13px;color:var(--ink-soft);
+    margin:0 0 24px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-soft);flex:none;}
+  .dot.ok{background:var(--live);}
+  .dot.wait{background:var(--gold);}
+  .dot.bad{background:var(--danger);}
+  .banner{
+    border-radius:8px;
+    padding:12px 14px;
+    font-size:13px;
+    line-height:1.5;
+    margin-bottom:20px;
+  }
+  .banner.erro{background:var(--danger-bg);border:1px solid var(--danger);color:var(--danger);}
+  .banner.setup{background:var(--gold-bg);border:1px solid var(--gold-line);color:#6B4E08;}
+  .banner code{font-family:"SF Mono",Consolas,monospace;font-size:12px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:13px;color:var(--ink-soft);margin-bottom:5px;}
+  .field input{
+    width:100%;height:36px;padding:0 10px;
+    border:1px solid var(--line);border-radius:8px;
+    background:var(--paper);color:var(--ink);
+    font-size:14px;font-family:inherit;
+  }
+  .field input:focus{outline:2px solid var(--ink);outline-offset:1px;border-color:var(--ink);}
+  .field.short{max-width:200px;}
+  .grid25{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:12px;}
+  .num{
+    aspect-ratio:1/1;
+    border:1px solid var(--line);
+    background:var(--paper);
+    border-radius:50%;
+    font-family:"SF Mono",Consolas,monospace;
+    font-size:14px;font-weight:600;color:var(--ink-soft);
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .12s,color .12s,border-color .12s;
+  }
+  .num:hover{border-color:var(--ink-soft);}
+  .num:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  .num.on{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .count{font-size:13px;color:var(--ink-soft);}
+  .count b{color:var(--ink);}
+  button.action{
+    height:36px;padding:0 16px;border-radius:8px;
+    border:1px solid var(--ink);background:var(--ink);color:#fff;
+    font-size:14px;font-weight:600;cursor:pointer;
+  }
+  button.action:hover{background:#0B2E22;}
+  button.action[disabled]{opacity:.5;cursor:not-allowed;}
+  button.ghost{
+    height:32px;padding:0 12px;border-radius:8px;
+    border:1px solid var(--line);background:transparent;color:var(--ink-soft);
+    font-size:13px;cursor:pointer;
+  }
+  button.ghost:hover{border-color:var(--ink-soft);color:var(--ink);}
+  button.ghost[disabled]{opacity:.5;cursor:not-allowed;}
+  .err{font-size:13px;color:var(--danger);margin-top:8px;}
+  .empty{color:var(--ink-soft);font-size:14px;padding:8px 0;}
+  .ticket{
+    border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;margin-bottom:10px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+  }
+  .ticket.win{background:var(--gold-bg);border-color:var(--gold-line);}
+  .ticket .body{flex:1;min-width:0;}
+  .ticket .who{font-size:12px;color:var(--ink-soft);margin-bottom:3px;}
+  .ticket .nums{
+    font-family:"SF Mono",Consolas,monospace;
+    font-size:13px;color:var(--ink-soft);line-height:1.6;
+  }
+  .ticket .nums b{color:var(--ink);}
+  .hit-badge{
+    font-family:"SF Mono",Consolas,monospace;
+    font-size:13px;font-weight:700;color:var(--ink-soft);
+    min-width:64px;text-align:right;
+  }
+  .ticket.win .hit-badge{color:var(--gold);}
+  .result-title{font-size:14px;color:var(--ink-soft);margin:0 0 14px;}
+  .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+  .head-row h2{margin:0;}
+  .sync{font-size:12px;color:var(--ink-soft);margin:10px 0 0;}
+
+  @media (max-width: 480px){
+    .wrap{padding:18px 12px 48px;}
+    h1{font-size:19px;}
+    .sub{font-size:13px;}
+    section{padding:14px;margin-bottom:14px;}
+    .grid25{gap:5px;}
+    .num{font-size:12px;}
+    .ticket{flex-direction:column;align-items:stretch;gap:6px;}
+    .ticket .nums{font-size:12px;line-height:1.5;word-break:break-word;}
+    .hit-badge{text-align:left;min-width:0;}
+    .row{flex-direction:column;align-items:stretch;gap:10px;}
+    button.action{width:100%;}
+    .field.short{max-width:none;}
+  }
+  @media (max-width: 360px){ .num{font-size:11px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bolão dos Fernandes</h1>
+  <p class="sub">Os jogos ficam salvos no banco do bolão. Todo mundo que abrir esta página vê a mesma lista e o mesmo resultado.</p>
+  <p class="conn"><span class="dot" id="connDot"></span><span id="connText">Conectando ao banco…</span></p>
+
+  <div class="banner" id="banner" style="display:none;"></div>
+
+  <section>
+    <h2>Novo jogo</h2>
+    <div class="field short">
+      <label for="inpApostador">Quem está jogando</label>
+      <input id="inpApostador" type="text" maxlength="40" placeholder="Ex.: Marcos" autocomplete="name">
+    </div>
+    <div class="grid25" id="gridNew"></div>
+    <div class="row">
+      <span class="count"><b id="countNew">0</b>/15 números selecionados</span>
+      <button class="action" id="btnSave">Salvar jogo</button>
+    </div>
+    <div class="err" id="errNew" style="display:none;"></div>
+  </section>
+
+  <section>
+    <div class="head-row">
+      <h2>Jogos do bolão <span id="gamesTotal" style="font-weight:400;color:var(--ink-soft);"></span></h2>
+      <button class="ghost" id="btnReload">Atualizar</button>
+    </div>
+    <div id="gamesList"></div>
+    <p class="sync" id="syncInfo"></p>
+  </section>
+
+  <section>
+    <h2>Conferir sorteio</h2>
+    <div class="field short">
+      <label for="inpConcurso">Concurso</label>
+      <input id="inpConcurso" type="number" inputmode="numeric" min="1" placeholder="Ex.: 3210">
+    </div>
+    <div class="grid25" id="gridDraw"></div>
+    <div class="row">
+      <span class="count"><b id="countDraw">0</b>/15 números do sorteio</span>
+      <button class="action" id="btnCheck">Conferir resultado</button>
+    </div>
+    <div class="err" id="errDraw" style="display:none;"></div>
+  </section>
+
+  <section id="resultsSection" style="display:none;">
+    <h2>Resultado</h2>
+    <p class="result-title" id="resultTitle"></p>
+    <div id="resultsList"></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ============================================================
+   CONFIG — dados do projeto Supabase
+   Project Settings › API Keys (use a chave publishable/anon)
+   ============================================================ */
+const CONFIG = {
+  url: 'https://rfkpidenoyesgygxyznl.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJma3BpZGVub3llc2d5Z3h5em5sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzOTk4NzEsImV4cCI6MjEwNDk3NTg3MX0.PHKJg_b8FVShEU-4ErUNzWS7nNeaWoE4F32Z1BFSe3I'
+};
+
+const configurado =
+  CONFIG.url.startsWith('https://') &&
+  CONFIG.url.includes('.supabase.co') &&
+  CONFIG.anonKey.length > 40;
+
+const supa = (configurado && window.supabase)
+  ? window.supabase.createClient(CONFIG.url, CONFIG.anonKey, {
+      realtime: { params: { eventsPerSecond: 5 } }
+    })
+  : null;
+
+/* ============================================================
+   Acesso ao banco — única fonte dos dados
+   ============================================================ */
+const db = {
+  async listarJogos(){
+    const { data, error } = await supa
+      .from('jogos')
+      .select('id, apostador, numeros, criado_em')
+      .order('criado_em', { ascending: true });
+    if(error) throw error;
+    return (data || []).map(j => ({ ...j, numeros: j.numeros.map(Number) }));
+  },
+  async incluirJogo(apostador, numeros){
+    const { data, error } = await supa
+      .from('jogos')
+      .insert({ apostador: apostador || null, numeros })
+      .select()
+      .single();
+    if(error) throw error;
+    return { ...data, numeros: data.numeros.map(Number) };
+  },
+  async removerJogo(id){
+    const { error } = await supa.from('jogos').delete().eq('id', id);
+    if(error) throw error;
+  },
+  async ultimoSorteio(){
+    const { data, error } = await supa
+      .from('sorteios')
+      .select('id, concurso, numeros, criado_em')
+      .order('criado_em', { ascending: false })
+      .limit(1);
+    if(error) throw error;
+    const s = data && data[0];
+    return s ? { ...s, numeros: s.numeros.map(Number) } : null;
+  },
+  async salvarSorteio(concurso, numeros){
+    const { data, error } = await supa
+      .from('sorteios')
+      .insert({ concurso: concurso || null, numeros })
+      .select()
+      .single();
+    if(error) throw error;
+    return { ...data, numeros: data.numeros.map(Number) };
+  }
+};
+
+/* ============================================================
+   Estado (espelho do banco, recarregado a cada sincronização)
+   ============================================================ */
+let jogos = [];
+let sorteio = null;
+let sorteioEditado = false;
+let aoVivo = false;
+const selecaoNova = new Set();
+const selecaoSorteio = new Set();
+
+/* ============================================================
+   Grades de números
+   ============================================================ */
+function montarGrade(container, selecionados, aoAlternar){
+  container.innerHTML = '';
+  for(let n=1;n<=25;n++){
+    const b = document.createElement('button');
+    b.className = 'num' + (selecionados.has(n) ? ' on' : '');
+    b.textContent = n;
+    b.type = 'button';
+    b.setAttribute('aria-pressed', selecionados.has(n) ? 'true' : 'false');
+    b.addEventListener('click', () => aoAlternar(n, b));
+    container.appendChild(b);
+  }
+}
+
+function pad(n){ return n < 10 ? '0'+n : ''+n; }
+
+function alternar(set, n, btn, errEl, countEl, msgLimite){
+  if(set.has(n)){
+    set.delete(n);
+    btn.classList.remove('on');
+    btn.setAttribute('aria-pressed','false');
+    errEl.style.display = 'none';
+  } else {
+    if(set.size >= 15){
+      errEl.textContent = msgLimite;
+      errEl.style.display = 'block';
+      return;
+    }
+    set.add(n);
+    btn.classList.add('on');
+    btn.setAttribute('aria-pressed','true');
+    errEl.style.display = 'none';
+  }
+  countEl.textContent = set.size;
+}
+
+const gridNew   = document.getElementById('gridNew');
+const countNew  = document.getElementById('countNew');
+const errNew    = document.getElementById('errNew');
+const gridDraw  = document.getElementById('gridDraw');
+const countDraw = document.getElementById('countDraw');
+const errDraw   = document.getElementById('errDraw');
+
+function montarGradeNova(){
+  montarGrade(gridNew, selecaoNova, (n, btn) =>
+    alternar(selecaoNova, n, btn, errNew, countNew, 'Você já selecionou 15 números. Remova um para trocar.'));
+  countNew.textContent = selecaoNova.size;
+}
+function montarGradeSorteio(){
+  montarGrade(gridDraw, selecaoSorteio, (n, btn) => {
+    sorteioEditado = true;
+    alternar(selecaoSorteio, n, btn, errDraw, countDraw, 'O sorteio tem 15 números. Remova um para trocar.');
+  });
+  countDraw.textContent = selecaoSorteio.size;
+}
+montarGradeNova();
+montarGradeSorteio();
+
+/* ============================================================
+   Conexão, avisos e relógio de sincronização
+   ============================================================ */
+function conexao(estado, texto){
+  document.getElementById('connDot').className = 'dot ' + estado;
+  document.getElementById('connText').textContent = texto;
+}
+
+function aviso(texto, tipo){
+  const el = document.getElementById('banner');
+  if(!texto){ el.style.display = 'none'; return; }
+  el.className = 'banner ' + (tipo || 'erro');
+  el.innerHTML = texto;
+  el.style.display = 'block';
+}
+
+function erroBanco(e, acao){
+  console.error(acao, e);
+  aviso(acao + ': ' + (e && e.message ? e.message : 'falha na conexão com o banco.'), 'erro');
+}
+
+function marcarSincronizacao(){
+  const agora = new Date();
+  const hora = pad(agora.getHours()) + ':' + pad(agora.getMinutes()) + ':' + pad(agora.getSeconds());
+  document.getElementById('syncInfo').textContent =
+    (aoVivo ? 'Atualiza sozinho quando alguém mexe. ' : 'Atualiza a cada 20 segundos. ') +
+    'Última leitura do banco às ' + hora + '.';
+}
+
+function bloquearEdicao(){
+  document.getElementById('btnSave').disabled = true;
+  document.getElementById('btnCheck').disabled = true;
+  document.getElementById('btnReload').disabled = true;
+  document.getElementById('inpApostador').disabled = true;
+  document.getElementById('inpConcurso').disabled = true;
+}
+
+/* ============================================================
+   Listas
+   ============================================================ */
+function escapar(s){
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function renderJogos(){
+  const list = document.getElementById('gamesList');
+  const total = document.getElementById('gamesTotal');
+  total.textContent = jogos.length ? '(' + jogos.length + ')' : '';
+  if(jogos.length === 0){
+    list.innerHTML = '<p class="empty">Nenhum jogo no bolão ainda. Selecione 15 números acima e clique em "Salvar jogo".</p>';
+    return;
+  }
+  list.innerHTML = '';
+  jogos.forEach(j => {
+    const div = document.createElement('div');
+    div.className = 'ticket';
+    const nums = j.numeros.slice().sort((a,b)=>a-b).map(pad).join('  ');
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.innerHTML = (j.apostador ? '<div class="who">' + escapar(j.apostador) + '</div>' : '') +
+                     '<div class="nums">' + nums + '</div>';
+    div.appendChild(body);
+    const del = document.createElement('button');
+    del.className = 'ghost';
+    del.textContent = 'Remover';
+    del.addEventListener('click', async () => {
+      del.disabled = true;
+      del.textContent = 'Removendo…';
+      try{
+        await db.removerJogo(j.id);
+        aviso('');
+        await sincronizar();
+      }catch(e){
+        erroBanco(e, 'Não foi possível remover o jogo');
+        del.disabled = false;
+        del.textContent = 'Remover';
+      }
+    });
+    div.appendChild(del);
+    list.appendChild(div);
+  });
+}
+
+function renderResultado(){
+  const section = document.getElementById('resultsSection');
+  const title = document.getElementById('resultTitle');
+  const list = document.getElementById('resultsList');
+
+  if(!sorteio || !sorteio.numeros || sorteio.numeros.length !== 15){
+    section.style.display = 'none';
+    return;
+  }
+
+  const sorteados = new Set(sorteio.numeros);
+  const legenda = (sorteio.concurso ? 'Concurso ' + sorteio.concurso + ' — ' : 'Sorteio: ') +
+                  sorteio.numeros.slice().sort((a,b)=>a-b).map(pad).join(' ');
+  section.style.display = 'block';
+
+  if(jogos.length === 0){
+    title.textContent = legenda;
+    list.innerHTML = '<p class="empty">Nenhum jogo no bolão para comparar.</p>';
+    return;
+  }
+
+  const pontuados = jogos.map(j => ({
+    jogo: j,
+    acertos: j.numeros.filter(n => sorteados.has(n)).length
+  })).sort((a,b) => b.acertos - a.acertos);
+
+  const premiados = pontuados.filter(p => p.acertos > 12).length;
+  title.textContent = legenda + '  —  ' + premiados +
+    (premiados === 1 ? ' jogo com mais de 12 acertos' : ' jogos com mais de 12 acertos');
+
+  list.innerHTML = '';
+  pontuados.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'ticket' + (p.acertos > 12 ? ' win' : '');
+    const nums = p.jogo.numeros.slice().sort((a,b)=>a-b).map(n => {
+      const str = pad(n);
+      return sorteados.has(n) ? '<b>'+str+'</b>' : str;
+    }).join('  ');
+    div.innerHTML = '<div class="body">' +
+        (p.jogo.apostador ? '<div class="who">' + escapar(p.jogo.apostador) + '</div>' : '') +
+        '<div class="nums">' + nums + '</div>' +
+      '</div>' +
+      '<div class="hit-badge">' + p.acertos + ' acertos</div>';
+    list.appendChild(div);
+  });
+}
+
+/* ============================================================
+   Sincronização com o banco
+   ============================================================ */
+let sincronizando = false;
+
+async function sincronizar(){
+  if(!supa || sincronizando) return;
+  sincronizando = true;
+  try{
+    const [listaJogos, ultimo] = await Promise.all([db.listarJogos(), db.ultimoSorteio()]);
+    jogos = listaJogos;
+    sorteio = ultimo;
+    aviso('');
+    renderJogos();
+    renderResultado();
+    if(sorteio && !sorteioEditado){
+      selecaoSorteio.clear();
+      sorteio.numeros.forEach(n => selecaoSorteio.add(n));
+      montarGradeSorteio();
+      document.getElementById('inpConcurso').value = sorteio.concurso || '';
+    }
+    marcarSincronizacao();
+  }catch(e){
+    erroBanco(e, 'Não foi possível ler os dados do bolão');
+  }finally{
+    sincronizando = false;
+  }
+}
+
+/* ============================================================
+   Ações
+   ============================================================ */
+const btnSave = document.getElementById('btnSave');
+btnSave.addEventListener('click', async () => {
+  if(selecaoNova.size !== 15){
+    errNew.textContent = 'Selecione exatamente 15 números para salvar o jogo.';
+    errNew.style.display = 'block';
+    return;
+  }
+  const apostador = document.getElementById('inpApostador').value.trim();
+  const numeros = Array.from(selecaoNova).sort((a,b)=>a-b);
+  btnSave.disabled = true;
+  btnSave.textContent = 'Salvando…';
+  try{
+    await db.incluirJogo(apostador, numeros);
+    selecaoNova.clear();
+    montarGradeNova();
+    errNew.style.display = 'none';
+    aviso('');
+    await sincronizar();
+  }catch(e){
+    erroBanco(e, 'Não foi possível salvar o jogo');
+  }finally{
+    btnSave.disabled = false;
+    btnSave.textContent = 'Salvar jogo';
+  }
+});
+
+const btnCheck = document.getElementById('btnCheck');
+btnCheck.addEventListener('click', async () => {
+  if(selecaoSorteio.size !== 15){
+    errDraw.textContent = 'Selecione exatamente 15 números do sorteio para conferir.';
+    errDraw.style.display = 'block';
+    return;
+  }
+  const numeros = Array.from(selecaoSorteio).sort((a,b)=>a-b);
+  const concursoRaw = document.getElementById('inpConcurso').value.trim();
+  const concurso = concursoRaw ? parseInt(concursoRaw, 10) : null;
+  btnCheck.disabled = true;
+  btnCheck.textContent = 'Conferindo…';
+  try{
+    await db.salvarSorteio(concurso, numeros);
+    sorteioEditado = false;
+    errDraw.style.display = 'none';
+    aviso('');
+    await sincronizar();
+    document.getElementById('resultsSection').scrollIntoView({ behavior:'smooth', block:'start' });
+  }catch(e){
+    erroBanco(e, 'Não foi possível gravar o sorteio');
+  }finally{
+    btnCheck.disabled = false;
+    btnCheck.textContent = 'Conferir resultado';
+  }
+});
+
+const btnReload = document.getElementById('btnReload');
+btnReload.addEventListener('click', async () => {
+  btnReload.disabled = true;
+  btnReload.textContent = 'Atualizando…';
+  sorteioEditado = false;
+  await sincronizar();
+  btnReload.disabled = false;
+  btnReload.textContent = 'Atualizar';
+});
+
+/* ============================================================
+   Início
+   ============================================================ */
+(async function init(){
+  if(!configurado){
+    conexao('bad', 'Banco não configurado.');
+    aviso('Preencha <code>CONFIG.url</code> e <code>CONFIG.anonKey</code> no início do script com os dados do seu projeto Supabase. ' +
+          'Enquanto isso o bolão não abre, porque nada é guardado no navegador.', 'setup');
+    bloquearEdicao();
+    return;
+  }
+  if(!window.supabase){
+    conexao('bad', 'Biblioteca do Supabase não carregou.');
+    aviso('A página precisa de internet para carregar o Supabase pelo CDN. Verifique a conexão e recarregue.', 'erro');
+    bloquearEdicao();
+    return;
+  }
+
+  conexao('wait', 'Carregando os jogos do bolão…');
+  await sincronizar();
+  conexao('ok', 'Conectado ao bolão.');
+
+  // Atualização ao vivo: recarrega assim que alguém inclui ou remove algo.
+  supa.channel('bolao')
+    .on('postgres_changes', { event:'*', schema:'public', table:'jogos' }, sincronizar)
+    .on('postgres_changes', { event:'*', schema:'public', table:'sorteios' }, sincronizar)
+    .subscribe(status => {
+      aoVivo = (status === 'SUBSCRIBED');
+      if(aoVivo) conexao('ok', 'Conectado ao bolão, atualizando ao vivo.');
+      else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT'){
+        conexao('wait', 'Conectado ao bolão, atualizando a cada 20 segundos.');
+      }
+      marcarSincronizacao();
+    });
+
+  // Rede de segurança: mesmo sem realtime a lista não fica velha.
+  setInterval(() => { if(!document.hidden) sincronizar(); }, 20000);
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) sincronizar(); });
+  window.addEventListener('online', sincronizar);
+})();
+</script>
+</body>
+</html>
