@@ -130,6 +130,7 @@
   .num:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
   .num.on{background:var(--ink);border-color:var(--ink);color:#fff;}
   .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .row-actions{display:flex;align-items:center;gap:8px;}
   .count{font-size:13px;color:var(--ink-soft);}
   .count b{color:var(--ink);}
   button.action{
@@ -184,6 +185,9 @@
     .hit-badge{text-align:left;min-width:0;}
     .row{flex-direction:column;align-items:stretch;gap:10px;}
     button.action{width:100%;}
+    .row-actions{width:100%;}
+    .row-actions button{flex:1;}
+    .row-actions button.ghost{height:36px;}
     .field.short{max-width:none;}
   }
   @media (max-width: 360px){ .num{font-size:11px;} }
@@ -229,13 +233,19 @@
     <div class="grid25" id="gridDraw"></div>
     <div class="row">
       <span class="count"><b id="countDraw">0</b>/15 números do sorteio</span>
-      <button class="action" id="btnCheck">Conferir resultado</button>
+      <div class="row-actions">
+        <button class="ghost" id="btnClearDraw">Limpar</button>
+        <button class="action" id="btnCheck">Conferir resultado</button>
+      </div>
     </div>
     <div class="err" id="errDraw" style="display:none;"></div>
   </section>
 
   <section id="resultsSection" style="display:none;">
-    <h2>Resultado</h2>
+    <div class="head-row">
+      <h2>Resultado</h2>
+      <button class="ghost" id="btnClearResult">Limpar resultado</button>
+    </div>
     <p class="result-title" id="resultTitle"></p>
     <div id="resultsList"></div>
   </section>
@@ -315,6 +325,9 @@ const db = {
 let jogos = [];
 let sorteio = null;
 let sorteioEditado = false;
+let resultadoOculto = false;    // o usuário limpou o resultado nesta tela
+let idResultadoOculto = null;   // qual sorteio foi escondido
+let ultimoSorteioId = null;     // último sorteio visto no banco
 let aoVivo = false;
 const selecaoNova = new Set();
 const selecaoSorteio = new Set();
@@ -412,6 +425,8 @@ function bloquearEdicao(){
   document.getElementById('btnSave').disabled = true;
   document.getElementById('btnCheck').disabled = true;
   document.getElementById('btnReload').disabled = true;
+  document.getElementById('btnClearDraw').disabled = true;
+  document.getElementById('btnClearResult').disabled = true;
   document.getElementById('inpApostador').disabled = true;
   document.getElementById('inpConcurso').disabled = true;
 }
@@ -467,8 +482,11 @@ function renderResultado(){
   const title = document.getElementById('resultTitle');
   const list = document.getElementById('resultsList');
 
-  if(!sorteio || !sorteio.numeros || sorteio.numeros.length !== 15){
+  const escondido = resultadoOculto && sorteio && sorteio.id === idResultadoOculto;
+  if(!sorteio || !sorteio.numeros || sorteio.numeros.length !== 15 || escondido){
     section.style.display = 'none';
+    title.textContent = '';
+    list.innerHTML = '';
     return;
   }
 
@@ -510,6 +528,30 @@ function renderResultado(){
 }
 
 /* ============================================================
+   Limpar a conferência
+   ------------------------------------------------------------
+   A limpeza vale só para esta tela: o sorteio continua gravado
+   no banco. Se alguém conferir um sorteio novo, o resultado
+   volta a aparecer sozinho para todo mundo. O botão "Atualizar"
+   também traz o resultado de volta.
+   ============================================================ */
+function limparResultado(){
+  resultadoOculto = true;
+  idResultadoOculto = sorteio ? sorteio.id : null;
+  renderResultado();
+}
+
+function limparConferencia(){
+  selecaoSorteio.clear();
+  montarGradeSorteio();
+  document.getElementById('inpConcurso').value = '';
+  errDraw.textContent = '';
+  errDraw.style.display = 'none';
+  sorteioEditado = true;   // evita que a sincronização repreencha a grade
+  limparResultado();
+}
+
+/* ============================================================
    Sincronização com o banco
    ============================================================ */
 let sincronizando = false;
@@ -521,6 +563,14 @@ async function sincronizar(){
     const [listaJogos, ultimo] = await Promise.all([db.listarJogos(), db.ultimoSorteio()]);
     jogos = listaJogos;
     sorteio = ultimo;
+    const idAtual = sorteio ? sorteio.id : null;
+    if(idAtual !== ultimoSorteioId){
+      // Sorteio novo no banco: volta a mostrar o resultado e a grade do sorteio.
+      ultimoSorteioId = idAtual;
+      resultadoOculto = false;
+      idResultadoOculto = null;
+      sorteioEditado = false;
+    }
     aviso('');
     renderJogos();
     renderResultado();
@@ -594,11 +644,16 @@ btnCheck.addEventListener('click', async () => {
   }
 });
 
+document.getElementById('btnClearDraw').addEventListener('click', limparConferencia);
+document.getElementById('btnClearResult').addEventListener('click', limparResultado);
+
 const btnReload = document.getElementById('btnReload');
 btnReload.addEventListener('click', async () => {
   btnReload.disabled = true;
   btnReload.textContent = 'Atualizando…';
   sorteioEditado = false;
+  resultadoOculto = false;
+  idResultadoOculto = null;
   await sincronizar();
   btnReload.disabled = false;
   btnReload.textContent = 'Atualizar';
